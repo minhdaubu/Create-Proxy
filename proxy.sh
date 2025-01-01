@@ -18,10 +18,10 @@ install_3proxy() {
     echo "installing 3proxy"
     URL="https://github.com/3proxy/3proxy/archive/refs/tags/0.9.4.tar.gz"
     wget -qO- $URL | tar -xzf-
-    cd 3proxy-0.8.13
+    cd 3proxy-0.9.4
     make -f Makefile.Linux
     mkdir -p /usr/local/etc/3proxy/{bin,logs,stat}
-    cp src/3proxy /usr/local/etc/3proxy/bin/
+    cp bin/* /usr/local/etc/3proxy/bin/
     cd $WORKDIR
 }
 
@@ -37,7 +37,7 @@ nscache 65536
 timeouts 1 5 30 60 180 1800 15 60
 setgid 65535
 setuid 65535
-stacksize 6291456 
+stacksize 6291456
 flush
 auth strong
 
@@ -64,7 +64,7 @@ gen_data() {
 
 gen_ifconfig() {
     cat <<EOF
-$(awk -F "/" '{print "ifconfig eth0 inet6 add " $5 "/64"}' ${WORKDATA})
+$(awk -F "/" '{print "ifconfig enp1s0 inet6 add " $5 "/64"}' ${WORKDATA})
 EOF
 }
 
@@ -93,7 +93,7 @@ echo "Internal IP = ${IP4}. External sub for IP6 = ${IP6}"
 
 FIRST_PORT=22000
 LAST_PORT=22100
-
+echo "gen"
 gen_data >$WORKDIR/data.txt
 gen_ifconfig >$WORKDIR/boot_ifconfig.sh
 chmod +x boot_*.sh /etc/rc.d/rc.local
@@ -105,16 +105,16 @@ bash ${WORKDIR}/boot_ifconfig.sh
 ulimit -n 10048
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 EOF
-
+echo "chmod"
 chmod +x /etc/rc.d/rc.local
 systemctl enable rc-local
 systemctl start rc-local
 
 bash /etc/rc.local
-
+echo "Gen proxy 4 user"
 gen_proxy_file_for_user
-rm -rf /root/setup.sh
-rm -rf /root/3proxy-3proxy-0.8.6
+#rm -rf /root/setup.sh
+#rm -rf /root/3proxy-3proxy-0.8.6
 
 echo "Starting Proxy"
 
