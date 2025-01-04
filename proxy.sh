@@ -1,43 +1,38 @@
 #!/bin/sh
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-
 random() {
-    tr </dev/urandom -dc A-Za-z0-9 | head -c5
-    echo
+        tr </dev/urandom -dc A-Za-z0-9 | head -c5
+        echo
 }
 
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
 gen64() {
-    ip64() {
-        echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"
-    }
-    echo "$1:$(ip64):$(ip64):$(ip64):$(ip64)"
+        ip64() {
+                echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"
+        }
+        echo "$1:$(ip64):$(ip64):$(ip64):$(ip64)"
 }
-
 install_3proxy() {
     echo "installing 3proxy"
     URL="https://github.com/3proxy/3proxy/archive/refs/tags/0.9.4.tar.gz"
-    wget -qO- $URL | tar -xzf-
+    wget -qO- $URL | bsdtar -xvf-
     cd 3proxy-0.9.4
     make -f Makefile.Linux
-    mkdir -p /usr/local/etc/3proxy/{bin,logs,stat}
-    cp bin/* /usr/local/etc/3proxy/bin/
+    mkdir -p /etc/3proxy/{bin,logs,stat}
+    cp bin/* /bin/
+    cp ./scripts/init.d/3proxy.sh /etc/init.d/3proxy
+    chmod +x /etc/init.d/3proxy
+    chkconfig 3proxy on
     cd $WORKDIR
 }
 
 gen_3proxy() {
     cat <<EOF
 daemon
-maxconn 4000
-nserver 1.1.1.1
-nserver 8.8.4.4
-nserver 2001:4860:4860::8888
-nserver 2001:4860:4860::8844
+maxconn 1000
 nscache 65536
 timeouts 1 5 30 60 180 1800 15 60
 setgid 65535
 setuid 65535
-stacksize 6291456
 flush
 auth strong
 
@@ -56,10 +51,32 @@ $(awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2 }' ${WORKDATA})
 EOF
 }
 
+upload_proxy() {
+    local PASS=$(random)
+    zip --password $PASS proxy.zip proxy.txt
+    #URL=$(curl -s --upload-file proxy.zip https://transfer.sh/proxy.zip)
+    URL=$(curl -F "file=@proxy.zip" https://temp.sh/upload)
+    echo "Proxy is ready! Format IP:PORT:LOGIN:PASS"
+    echo "Download zip archive from: ${URL}"
+    echo "Password: ${PASS}"
+
+}
 gen_data() {
     seq $FIRST_PORT $LAST_PORT | while read port; do
-        echo "user$port/$(random)/$IP4/$port/$(gen64 $IP6)"
+        echo "usr$(random)/pass$(random)/$IP4/$port/$(gen64 $IP6)"
     done
+}
+
+gen_iptables() {
+    cat <<EOF
+    $(awk -F "/" '{print "iptables -I INPUT -p tcp --dport " $4 "  -m state --state NEW -j ACCEPT"}' ${WORKDATA})
+EOF
+}
+
+gen_firewall() {
+    cat <<EOF
+    $(awk -F "/" '{print "firewall-cmd --permanent --add-port="$4"/tcp"}' ${WORKDATA})
+EOF
 }
 
 gen_ifconfig() {
@@ -67,56 +84,46 @@ gen_ifconfig() {
 $(awk -F "/" '{print "ifconfig enp1s0 inet6 add " $5 "/64"}' ${WORKDATA})
 EOF
 }
-
-upload_proxy() {
-    local PASS=$(random)
-    zip --password $PASS proxy.zip proxy.txt
-    URL=$(curl -F "file=@proxy.zip" https://temp.sh/upload)
-    echo "Proxy is ready! Format IP:PORT:LOGIN:PASS"
-    echo "Download zip archive from: ${URL}"
-    echo "Password: ${PASS}"
-}
-
 echo "installing apps"
+yum -y install gcc net-tools bsdtar zip >/dev/null
 
 install_3proxy
 
-echo "working folder = /home/bkns"
-WORKDIR="/home/bkns"
+echo "working folder = /home/proxy-installer"
+WORKDIR="/home/proxy-installer"
 WORKDATA="${WORKDIR}/data.txt"
-mkdir -p $WORKDIR && cd $WORKDIR
+mkdir $WORKDIR && cd $_
 
 IP4=$(curl -4 -s icanhazip.com)
 IP6=$(curl -6 -s icanhazip.com | cut -f1-4 -d':')
 
-echo "Internal IP = ${IP4}. External sub for IP6 = ${IP6}"
+echo "Internal ip = ${IP4}. Exteranl sub for ip6 = ${IP6}"
 
-FIRST_PORT=22000
-LAST_PORT=22100
-echo "gen"
+echo "How many proxy do you want to create? Example 500"
+read COUNT
+
+FIRST_PORT=10000
+LAST_PORT=$(($FIRST_PORT + $COUNT))
+
 gen_data >$WORKDIR/data.txt
+#gen_iptables >$WORKDIR/boot_iptables.sh
+#gen_firewall >$WORKDIR/boot_iptables.sh
 gen_ifconfig >$WORKDIR/boot_ifconfig.sh
-chmod +x boot_*.sh /etc/rc.d/rc.local
+chmod +x ${WORKDIR}/boot_*.sh /etc/rc.local
 
-gen_3proxy >/usr/local/etc/3proxy/3proxy.cfg
+gen_3proxy > /etc/3proxy/3proxy.cfg
 
-cat >>/etc/rc.d/rc.local <<EOF
+cat >>/etc/rc.local <<EOF
+#bash ${WORKDIR}/boot_iptables.sh
 bash ${WORKDIR}/boot_ifconfig.sh
+firewall-cmd --permanent --add-port=${FIRST_PORT}-${LAST_PORT}/tcp
+firewall-cmd --reload
 ulimit -n 10048
-/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
+service 3proxy start
 EOF
-echo "chmod"
-chmod +x /etc/rc.d/rc.local
-systemctl enable rc-local
-systemctl start rc-local
 
 bash /etc/rc.local
-echo "Gen proxy 4 user"
+
 gen_proxy_file_for_user
-#rm -rf /root/setup.sh
-#rm -rf /root/3proxy-3proxy-0.8.6
 
-echo "Starting Proxy"
-
-# Upload proxy details
 upload_proxy
