@@ -1,0 +1,1 @@
+bash <(curl -s "https://raw.githubusercontent.com/minhdaubu/Create-Proxy/refs/heads/main/proxy.sh")
